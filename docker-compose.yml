@@ -1,0 +1,178 @@
+services:
+  # ============================================================================
+  # Message Broker: RabbitMQ (com painel Management UI na porta 15672)
+  # ============================================================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: gamestore-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gamestore-network
+
+  # ============================================================================
+  # 1. UserAPI: Cadastro, Autenticação JWT, Autorização e publicação de UserCreatedEvent
+  # ============================================================================
+  user-api:
+    build:
+      context: ../gamestore-user-api
+      dockerfile: Dockerfile
+    image: gamestore/user-api:latest
+    container_name: gamestore-user-api
+    ports:
+      - "5001:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: "Data Source=/app/data/users.db"
+      Jwt__SecretKey: "GameStore_Super_Secret_Key_For_Jwt_Authentication_2026_Minimum_32_Chars"
+      Jwt__Issuer: "GameStoreAPI"
+      Jwt__Audience: "GameStoreClient"
+      Jwt__ExpirationHours: "8"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__Port: "5672"
+      RabbitMq__VirtualHost: "/"
+      RabbitMq__Username: "guest"
+      RabbitMq__Password: "guest"
+      RabbitMq__Queues__UserCreated: "UserCreatedEvent"
+      Services__UserApiUrl: "http://user-api:8080"
+      Services__CatalogApiUrl: "http://catalog-api:8080"
+      Services__PaymentsApiUrl: "http://payments-api:8080"
+      Services__NotificationsApiUrl: "http://notifications-api:8080"
+    volumes:
+      - users-data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - gamestore-network
+
+  # ============================================================================
+  # 2. CatalogAPI: CRUD de Jogos, Promoções, Biblioteca, OrderPlaceEvent e PaymentProcessedEvent
+  # ============================================================================
+  catalog-api:
+    build:
+      context: ../gamestore-catalog-api
+      dockerfile: Dockerfile
+    image: gamestore/catalog-api:latest
+    container_name: gamestore-catalog-api
+    ports:
+      - "5002:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: "Data Source=/app/data/catalog.db"
+      Jwt__SecretKey: "GameStore_Super_Secret_Key_For_Jwt_Authentication_2026_Minimum_32_Chars"
+      Jwt__Issuer: "GameStoreAPI"
+      Jwt__Audience: "GameStoreClient"
+      Jwt__ExpirationHours: "8"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__Port: "5672"
+      RabbitMq__VirtualHost: "/"
+      RabbitMq__Username: "guest"
+      RabbitMq__Password: "guest"
+      RabbitMq__Queues__OrderPlace: "OrderPlaceEvent"
+      RabbitMq__Queues__PaymentProcessedCatalog: "PaymentProcessedEvent.Catalog"
+      Services__UserApiUrl: "http://user-api:8080"
+      Services__CatalogApiUrl: "http://catalog-api:8080"
+      Services__PaymentsApiUrl: "http://payments-api:8080"
+      Services__NotificationsApiUrl: "http://notifications-api:8080"
+    volumes:
+      - catalog-data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - gamestore-network
+
+  # ============================================================================
+  # 3. PaymentsAPI: Consome OrderPlaceEvent, simula pagamento e publica PaymentProcessedEvent
+  # ============================================================================
+  payments-api:
+    build:
+      context: ../gamestore-payments-api
+      dockerfile: Dockerfile
+    image: gamestore/payments-api:latest
+    container_name: gamestore-payments-api
+    ports:
+      - "5003:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: "Data Source=/app/data/payments.db"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__Port: "5672"
+      RabbitMq__VirtualHost: "/"
+      RabbitMq__Username: "guest"
+      RabbitMq__Password: "guest"
+      RabbitMq__Queues__OrderPlace: "OrderPlaceEvent"
+      RabbitMq__Queues__PaymentProcessed: "PaymentProcessedEvent"
+      Services__UserApiUrl: "http://user-api:8080"
+      Services__CatalogApiUrl: "http://catalog-api:8080"
+      Services__PaymentsApiUrl: "http://payments-api:8080"
+      Services__NotificationsApiUrl: "http://notifications-api:8080"
+    volumes:
+      - payments-data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - gamestore-network
+
+  # ============================================================================
+  # 4. NotificationsAPI: Consome UserCreatedEvent e PaymentProcessedEvent para envio de e-mails
+  # ============================================================================
+  notifications-api:
+    build:
+      context: ../gamestore-notifications-api
+      dockerfile: Dockerfile
+    image: gamestore/notifications-api:latest
+    container_name: gamestore-notifications-api
+    ports:
+      - "5004:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__DefaultConnection: "Data Source=/app/data/notifications.db"
+      RabbitMq__Host: "rabbitmq"
+      RabbitMq__Port: "5672"
+      RabbitMq__VirtualHost: "/"
+      RabbitMq__Username: "guest"
+      RabbitMq__Password: "guest"
+      RabbitMq__Queues__UserCreated: "UserCreatedEvent"
+      RabbitMq__Queues__PaymentProcessedNotifications: "PaymentProcessedEvent.Notifications"
+      Services__UserApiUrl: "http://user-api:8080"
+      Services__CatalogApiUrl: "http://catalog-api:8080"
+      Services__PaymentsApiUrl: "http://payments-api:8080"
+      Services__NotificationsApiUrl: "http://notifications-api:8080"
+    volumes:
+      - notifications-data:/app/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - gamestore-network
+
+volumes:
+  rabbitmq-data:
+  users-data:
+  catalog-data:
+  payments-data:
+  notifications-data:
+
+networks:
+  gamestore-network:
+    driver: bridge
+
