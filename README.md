@@ -106,28 +106,42 @@ docker compose down -v
 
 ---
 
-## ☸️ Deploy e Teste em Kubernetes Local (Docker Desktop, Minikube, Kind ou k3d)
+## ☸️ Deploy e Teste em Kubernetes Local com Kind (ou Minikube / Docker Desktop)
 
-Este repositório contém o manifesto do Message Broker em `k8s/rabbitmq.yaml` (incluindo `ConfigMap`, `Secret`, `Deployment` com probes e `Service`), enquanto cada repositório de microsserviço possui sua própria pasta `k8s/`.
+Este repositório contém os manifestos do Message Broker na pasta `k8s/` (`configmap.yaml`, `secret.yaml`, `deployment.yaml` e `service.yaml`), seguindo o mesmo padrão estrutural da pasta `k8s/` de cada repositório de microsserviço.
 
-### 1. Construir as Imagens Docker Localmente
+### 1. Criar o Cluster Local com Kind (se necessário)
+
+```bash
+# Criar o cluster Kubernetes local chamado "gamestore"
+kind create cluster --name gamestore
+
+# Confirmar que o contexto do kubectl aponta para o cluster recém-criado
+kubectl cluster-info --context kind-gamestore
+kubectl get nodes
+```
+
+### 2. Construir e Carregar as Imagens Docker no Cluster Kind
 
 A partir da pasta `gamestore-infra`:
 
 ```bash
-docker build -t gamestore/user-api:latest ../gamestore-user-api
-docker build -t gamestore/catalog-api:latest ../gamestore-catalog-api
-docker build -t gamestore/payments-api:latest ../gamestore-payments-api
-docker build -t gamestore/notifications-api:latest ../gamestore-notifications-api
+# 1. Garantir que as imagens foram construídas (caso ainda não tenha rodado docker compose build)
+docker compose build
+
+# 2. Carregar as 4 imagens locais para dentro do nó do cluster Kind
+# (A imagem pública do RabbitMQ é baixada automaticamente pelo próprio cluster no kubectl apply)
+kind load docker-image gamestore/user-api:latest --name gamestore
+kind load docker-image gamestore/catalog-api:latest --name gamestore
+kind load docker-image gamestore/payments-api:latest --name gamestore
+kind load docker-image gamestore/notifications-api:latest --name gamestore
 ```
 
-*(Caso utilize **Kind** ou **Minikube**, carregue as imagens no cluster com `kind load docker-image gamestore/user-api:latest ...` ou `minikube image load ...`).*
-
-### 2. Aplicar os Manifestos no Cluster Kubernetes
+### 3. Aplicar os Manifestos no Cluster Kubernetes
 
 ```bash
-# 1. Subir o broker RabbitMQ no cluster
-kubectl apply -f k8s/rabbitmq.yaml
+# 1. Subir o broker RabbitMQ no cluster (ConfigMap, Secret, Deployment e Service)
+kubectl apply -f k8s/
 
 # 2. Subir ConfigMaps, Secrets, Deployments e Services de cada microsserviço
 kubectl apply -f ../gamestore-user-api/k8s/
@@ -136,21 +150,28 @@ kubectl apply -f ../gamestore-payments-api/k8s/
 kubectl apply -f ../gamestore-notifications-api/k8s/
 ```
 
-### 3. Verificar Status dos Pods e Services
+### 4. Verificar Status dos Pods e Services
 
 ```bash
-kubectl get pods
+kubectl get pods -o wide
 kubectl get services
 kubectl get configmaps
 kubectl get secrets
 ```
 
-### 4. Expor os Serviços Localmente via Port-Forward para Testes
+### 5. Expor os Serviços Localmente via Port-Forward para Testes
 
 ```bash
+kubectl port-forward svc/rabbitmq 15672:15672 &
 kubectl port-forward svc/user-api 5001:80 &
 kubectl port-forward svc/catalog-api 5002:80 &
 kubectl port-forward svc/payments-api 5003:80 &
 kubectl port-forward svc/notifications-api 5004:80 &
+```
+
+### Removendo o Cluster Kind após os testes
+
+```bash
+kind delete cluster --name gamestore
 ```
 
